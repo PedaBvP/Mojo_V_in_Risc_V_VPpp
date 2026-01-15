@@ -27,6 +27,7 @@ typedef __int128_t int128_t;
 typedef __uint128_t uint128_t;
 
 #define RAISE_ILLEGAL_INSTRUCTION() raise_trap(EXC_ILLEGAL_INSTR, instr.data());
+#define RAISE_MOJOV_SECURITY_VIOLATION() raise_trap(EXC_MOJOV_SECURITY_VIOLATION, instr.data());
 
 #define RD instr.rd()
 #define RS1 instr.rs1()
@@ -7046,6 +7047,25 @@ uxlen_t ISS_CT::get_csr_value(uxlen_t addr) {
 			csrs.vcsr.reg.fields.vxrm = csrs.vxrm.reg.fields.vxrm;
 			csrs.vcsr.reg.fields.vxsat = csrs.vxsat.reg.fields.vxsat;
 			return csrs.vcsr.reg.val;
+
+		// MojoV Addr:
+
+		case MOJOV_CFG_ADDR:
+			return csrs.mojov_cfg.reg.val;
+
+		case MOJOV_CIPHERS_ADDR:
+			return csrs.mojov_ciphers.reg.val;
+
+		case MOJOV_PUBKEY_ADDR:
+			return csrs.mojov_pubkey.reg.val;
+
+		case MOJOV_KEYCFG_ADDR:
+			RAISE_ILLEGAL_INSTRUCTION();
+			return 0;
+
+		case MOJOV_KEYSTATE_ADDR:
+			return csrs.mojov_keystate.reg.val;
+
 	}
 
 	if (!csrs.is_valid_csr64_addr(addr))
@@ -7185,6 +7205,46 @@ void ISS_CT::set_csr_value(uxlen_t addr, uxlen_t value) {
 			csrs.vxsat.reg.fields.vxsat = csrs.vcsr.reg.fields.vxsat;
 			break;
 
+
+		// MojoV Addr:
+
+		case MOJOV_CFG_ADDR:
+			if(csrs.mojov_cfg.reg.fields.key_valid == 1){
+				write(csrs.mojov_cfg, MOJOV_CFG_WRITE_MASK);
+			}else{
+				value = 0x0;
+				write(csrs.mojov_cfg, MOJOV_CFG_WRITE_MASK);
+			}
+
+			if((value & MOJOV_CFG_WRITE_MASK) == 0x0){
+				for(int i = 24; i < 32; i++){
+					regs[i] = 0;
+					fp_regs[i] = 0;
+				}
+			}
+			break;
+
+		case MOJOV_CIPHERS_ADDR:
+			RAISE_ILLEGAL_INSTRUCTION();
+			break;
+
+		case MOJOV_PUBKEY_ADDR:
+			RAISE_ILLEGAL_INSTRUCTION();
+			break;
+
+		case MOJOV_KEYCFG_ADDR:
+			mojov_keycfg_buf[mojov_keycfg_idx++] = value;
+			if(mojov_keycfg_idx == 8){
+				install_contract();
+				mojov_keycfg_idx = 0;
+			}
+			break;
+
+		case MOJOV_KEYSTATE_ADDR:
+			csrs.mojov_keystate = value;
+			break;
+
+
 		default:
 			if (!csrs.is_valid_csr64_addr(addr))
 				RAISE_ILLEGAL_INSTRUCTION();
@@ -7196,6 +7256,43 @@ void ISS_CT::set_csr_value(uxlen_t addr, uxlen_t value) {
 	 * TODO: optimize -> move to specific csrs above
 	 */
 	maybe_interrupt_pending();
+}
+
+// MojoV
+
+void ISS_CT::install_contract() {
+    uint128_t sig = (uint128_t)mojov_keycfg_buf[0] | ((uint128_t)mojov_keycfg_buf[1] << 64);
+	uint8_t sig_bytes[16];
+	memcpy(sig_bytes, &sig, 16);
+
+    uint128_t sym_key_128 = (uint128_t)mojov_keycfg_buf[2] | ((uint128_t)mojov_keycfg_buf[3] << 64);
+    uint64_t contract_sig = mojov_keycfg_buf[4];
+    uint64_t salt         = mojov_keycfg_buf[5];
+    uint64_t ciphers      = mojov_keycfg_buf[6];
+    uint8_t  format_sel   = (uint8_t)(mojov_keycfg_buf[7] & 0xFF);
+
+	bool correct_sig = memcmp(sig_bytes, "Mojo-V ver. #001", 16) == 0;
+	bool correct_ciphers = (__builtin_popcountll(ciphers) == 2) && ((ciphers & csrs.mojov_ciphers.reg.val) == ciphers);
+	bool correct_format_sel = format_sel == 0x0 || format_sel == 0x1 || format_sel == 0x2;
+
+
+	if (!correct_sig || !correct_ciphers || !correct_format_sel) {
+    csrs.mojov_cfg.reg.fields.key_valid = 0;
+    csrs.mojov_cfg.reg.fields.mojov_en  = 0;
+    RAISE_MOJOV_SECURITY_VIOLATION();
+    return;
+}
+
+
+
+	csrs.mojov_cfg.reg.fields.format_sel = format_sel;
+	csrs.mojov_cfg.reg.fields.key_valid = 1;
+	set_csr_value(MOJOV_CFG_ADDR, 0x0);
+
+	mojov_sym_key = sym_key_128;
+	mojov_contract_sig = contract_sig;
+	mojov_salt = salt;
+	mojov_ciphers_active = ciphers;
 }
 
 void ISS_CT::init(instr_memory_if *instr_mem, bool use_dbbcache, data_memory_if *data_mem, bool use_lscache,

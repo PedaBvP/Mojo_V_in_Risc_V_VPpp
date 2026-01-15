@@ -66,6 +66,16 @@ struct PendingInterrupts {
 	uxlen_t pending;
 };
 
+// MojoV
+
+uint64_t mojov_keycfg_buf[8];
+uint8_t mojov_keycfg_idx;
+uint128_t mojov_sym_key;
+uint64_t  mojov_contract_sig;
+uint64_t  mojov_salt;
+uint64_t  mojov_ciphers_active;
+
+
 /*
  * NOTE RVxx.2: C-style macros
  * Create concrete ISS type definitions from iss_ctemplate.h using iss_ctemplate_handle.h

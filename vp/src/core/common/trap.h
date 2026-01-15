@@ -39,6 +39,9 @@ enum ExceptionCode {
 	EXC_CHERI_LOAD_FAULT = 26,
 	EXC_CHERI_STORE_FAULT = 27,
 	EXC_CHERI_FAULT = 28,
+
+	// MojoV exception codes
+	EXC_MOJOV_SECURITY_VIOLATION = 41,
 };
 
 struct SimulationTrap {
