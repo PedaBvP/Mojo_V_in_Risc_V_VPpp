@@ -340,6 +340,21 @@ struct csr_vlenb {
 	} reg;
 };
 
+//MojoV structs
+
+struct csr_mojov_cfg{
+	union reg{
+		uint64_t val = 0;
+		struct fields{
+			unsigned mojov_en : 1;
+			unsigned key_valid : 1;
+			unsigned format_sel : 2;
+			unsigned mojo_ver : 8;
+			uint64_t reserved : 20;
+		} fields;
+	} reg;
+};
+
 namespace csr {
 template <typename T>
 inline bool is_bitset(T &csr, unsigned bitpos) {
@@ -383,6 +398,10 @@ constexpr uint64_t VTYPE_MASK = 0b1000000000000000000000000000000000000000000000
 constexpr uint64_t VXRM_MASK = 0b11;
 constexpr uint64_t VXSAT_MASK = 0b1;
 constexpr uint64_t VCSR_MASK = 0b111;
+
+// MojoV Masks
+constexpr uint64_t MOJOV_CFG_WRITE_MASK = 0x1;
+
 // 64 bit timer csrs
 constexpr unsigned CYCLE_ADDR = 0xC00;
 constexpr unsigned TIME_ADDR = 0xC01;
@@ -624,6 +643,14 @@ constexpr unsigned VCSR_ADDR = 0x00F;
 constexpr unsigned VL_ADDR = 0xC20;
 constexpr unsigned VTYPE_ADDR = 0xC21;
 constexpr unsigned VLENB_ADDR = 0xC22;
+
+// MojoV
+constexpr unsigned MOJOV_CFG_ADDR = 0x0A0;
+constexpr unsigned MOJOV_CIPHERS_ADDR = 0x0A1;
+constexpr unsigned MOJOV_PUBKEY_ADDR = 0x0A2;
+constexpr unsigned MOJOV_KEYCFG_ADDR = 0x0A3;
+constexpr unsigned MOJOV_KEYSTATE_ADDR = 0x0A4;
+
 }  // namespace csr
 
 struct csr_table {
@@ -683,6 +710,13 @@ struct csr_table {
 	csr_vtype vtype;
 	csr_vl vl;
 	csr_vl vlenb;
+
+	// mojo v
+	csr_mojov_cfg mojov_cfg;
+	csr_64 mojov_ciphers;
+	csr_64 mojov_pubkey;
+	csr_64 mojov_keystate;
+
 
 	std::unordered_map<unsigned, uint64_t *> register_mapping;
 
@@ -745,6 +779,13 @@ struct csr_table {
 		register_mapping[VL_ADDR] = &vl.reg.val;
 		register_mapping[VTYPE_ADDR] = &vtype.reg.val;
 		register_mapping[VLENB_ADDR] = &vlenb.reg.val;
+
+		// MojoV
+		register_mapping[MOJOV_CFG_ADDR] = &mojov_cfg.reg.val;
+		register_mapping[MOJOV_CIPHERS_ADDR] = &mojov_ciphers.reg.val;
+		register_mapping[MOJOV_PUBKEY_ADDR] = &mojov_pubkey.reg.val;
+		register_mapping[MOJOV_KEYSTATE_ADDR] = &mojov_keystate.reg.val;
+
 	}
 
 	bool is_valid_csr64_addr(unsigned addr) {
