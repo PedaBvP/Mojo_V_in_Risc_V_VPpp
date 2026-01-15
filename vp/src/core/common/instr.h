@@ -915,6 +915,12 @@ enum OpId {
 	WFI,
 	SFENCE_VMA,
 
+	// MojoV
+	SDE,
+	LDE,
+	FSDE,
+	FLDE,
+
 	NUMBER_OF_OPERATIONS
 };
 

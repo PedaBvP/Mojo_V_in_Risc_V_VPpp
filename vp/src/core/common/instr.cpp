@@ -1670,6 +1670,18 @@ constexpr uint32_t VCOMPRESS_VM_ENCODING = 0b1011100000000000010000001010111;
 constexpr uint32_t VCOMPRESS_VM_MASK = 0b11111100000000000111000001111111;
 constexpr uint32_t VMV_NR_R_V_ENCODING = 0b10011100000000000011000001010111;
 constexpr uint32_t VMV_NR_R_V_MASK = 0b11111100000000000111000001111111;
+
+// Mojo V
+
+constexpr uint32_t SDE_MASK = 0b00000000000000000111000001111111;
+constexpr uint32_t SDE_ENCODING = 0b00000000000000000001000000001011;
+constexpr uint32_t LDE_MASK = 0b00000000000000000111000001111111;
+constexpr uint32_t LDE_ENCODING = 0b00000000000000000000000000001011;
+constexpr uint32_t FSDE_MASK = 0b00000000000000000111000001111111;
+constexpr uint32_t FSDE_ENCODING = 0b00000000000000000011000000001011;
+constexpr uint32_t FLDE_MASK = 0b00000000000000000111000001111111;
+constexpr uint32_t FLDE_ENCODING = 0b00000000000000000010000000001011;
+
 // RV-V Extension End -- Placeholder 0
 
 /*
@@ -2649,6 +2661,12 @@ std::array<const char *, Operation::OpId::NUMBER_OF_OPERATIONS> Operation::opIdS
     "MRET",
     "WFI",
     "SFENCE_VMA",
+
+	// Mojo V
+	"SDE",
+	"LDE",
+	"FSDE",
+	"FLDE",
 };
 
 Operation::Type Operation::getType(Operation::OpId opId) {
@@ -2865,6 +2883,8 @@ Operation::Type Operation::getType(Operation::OpId opId) {
 		case FLW:
 		case FLD:
 		case FLH:
+		case LDE:
+		case FLDE:
 			return Type::I;
 
 		case SB:
@@ -2874,6 +2894,8 @@ Operation::Type Operation::getType(Operation::OpId opId) {
 		case FSW:
 		case FSD:
 		case FSH:
+		case SDE:
+		case FSDE:
 			return Type::S;
 
 		case BEQ:
@@ -7200,6 +7222,21 @@ Operation::OpId Instruction::decode_normal(Architecture arch, const RV_ISA_Confi
 			}
 			break;
 			// RV-V Extension End -- Placeholder 1
+			
+		// Mojo V
+		case OP_CUST0:
+			switch(instr.funct3()){
+				case 0:
+					MATCH_AND_RETURN_INSTR(LDE);
+				case 1:
+					MATCH_AND_RETURN_INSTR(SDE);
+				case 2:
+					MATCH_AND_RETURN_INSTR(FLDE);
+				case 3:
+					MATCH_AND_RETURN_INSTR(FSDE);
+			}
+		break;
+
 	}
 
 	return Operation::OpId::UNDEF;
