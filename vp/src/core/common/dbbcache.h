@@ -277,13 +277,106 @@ class DBBCacheDummy_T : public DBBCacheBase_T<arch, T_uxlen_t, T_instr_memory_if
 
 	__always_inline void abort_fetch_decode_fast() {}
 
-	__always_inline void *fetch_decode(T_uxlen_t &pc, Instruction &instr) {
+	__always_inline void *fetch_decode(T_uxlen_t &pc, Instruction &instr, bool mojoV_enabled) {
 		Operation::OpId opId;
 		this->last_pc = this->pc;
 		this->mem_word = fetch_decode(pc, instr, opId);
 		this->pc = pc;
+		if(mojoV_enabled){
+			mojov_security_validation(opId, instr);
+		}
+
 		cycle_counter_raw += this->opMap[opId].instr_time;
 		return this->opMap[opId].labelPtr;
+	}
+
+	__always_inline void mojov_security_validation(Operation::OpId opId, Instruction& instr){
+		auto raise_mojov_trap = [&]() { raise_trap(EXC_MOJOV_SECURITY_VIOLATION, instr.data()); };
+		bool is_rd_secret = is_secret(instr.rd());
+		bool is_rs1_secret = is_secret(instr.rs1());
+		bool is_rs2_secret = is_secret(instr.rs2());
+		// only allowed to be used when Type == R4
+		bool is_rs3_secret = is_secret(instr.rs3());
+
+		// mojoV, load + jump and special case handling
+		switch (opId) {
+        	case SDE:
+        	case FSDE:
+        	    if (!rs1_secret && rs2_secret) return;
+        	    raise_mojov_trap();
+        	    return;
+
+        	case LDE:
+        	case FLDE:
+        	    if (!rs1_secret && rd_secret) return;
+        	    raise_mojov_trap();
+        	    return;
+			case FLD:
+			case FLDE:
+			case FLW:
+			case LB:
+			case LBU:
+			case LD:
+			case LDE:
+			case LH:
+			case LHU:
+			case LR_D:
+			case LR_W:
+			case LW:
+			case LWU:
+			case JR:
+			case JALR:
+				if(is_rs1_secret) raise_mojov_trap();
+				return;
+			case CSRRS:
+			case CSRRW:
+			case CSRRC:
+				if(is_rd_secret || is_rs1_secret) raise_mojov_trap();
+				return;
+			case SFENCE_VMA:
+				if(is_rs1_secret || is_rs2_secret) raise_mojov_trap();
+				return;
+			default:
+				break;
+		}
+
+		// spec specific restrictions
+		if(instr.opcode() == OP_AMO){
+			raise_mojov_trap();
+			return;
+		}
+
+		// type mapping
+		switch(Operation::getType(opId)){
+			case Operation::Type::R:
+				if((is_rs1_secret || is_rs2_secret) && !is_rd_secret){
+					raise_mojov_trap();
+				}
+				break;
+
+			case Operation::Type::I:
+				if(is_rs1_secret && !is_rd_secret){
+					raise_mojov_trap();
+				}
+				break;
+			case Operation::Type::S:
+			case Operation::Type::B:
+				if((is_rs1_secret || is_rs2_secret)){
+					raise_mojov_trap();
+				}
+				break;
+			case Operation::Type::R4:
+				if((is_rs1_secret || is_rs2_secret || is_rs3_secret) && !is_rd_secret){
+					raise_mojov_trap();
+				}
+				break;
+			default:
+				break;
+		}
+	}
+
+	__always_inline bool is_secret(uint32_t reg){
+		return 24 <= reg && reg <= 31;
 	}
 
 	__always_inline T_uxlen_t get_last_pc_before_callback() {

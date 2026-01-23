@@ -203,22 +203,25 @@ void *ISS_CT::genOpMap() {
 	return OP_GLOBAL_FAST_ABORT_AND_FDD_LABEL_START;
 }
 
-#define OP_SLOW_FDD()                                                       \
-	assert(((pc & ~pc_alignment_mask()) == 0) && "misaligned instruction"); \
-	stats.inc_cnt();                                                        \
-	stats.inc_slow_fdd();                                                   \
-	void *opLabelPtr = dbbcache.fetch_decode(pc, instr);                    \
-	if (trace) {                                                            \
-		print_trace();                                                      \
-		/* always stay in slow path if trace enabled */                     \
-		force_slow_path();                                                  \
-	}                                                                       \
+#define OP_SLOW_FDD()                                                       						\
+	assert(((pc & ~pc_alignment_mask()) == 0) && "misaligned instruction"); 						\
+	stats.inc_cnt();                                                        						\
+	stats.inc_slow_fdd();                                                   						\
+	void *opLabelPtr = dbbcache.fetch_decode(pc, instr, csrs.mojov_cfg.reg.fields.mojov_en);        \
+	if (trace) {                                                            						\
+		print_trace();                                                      						\
+		/* always stay in slow path if trace enabled */                     						\
+		force_slow_path();                                                  						\
+	}                 																				\
+	if(csrs.mojov_cfg.reg.fields.mojov_en){															\
+		force_slow_path();																			\
+	}																								\
 	goto *opLabelPtr;
 
 #define OP_MED_FDD()     \
 	stats.inc_cnt();     \
 	stats.inc_med_fdd(); \
-	goto *dbbcache.fetch_decode(pc, instr);
+	goto *dbbcache.fetch_decode(pc, instr, csrs.mojov_cfg.reg.fields.mojov_en);
 
 #define OP_FAST_FDD()     \
 	stats.inc_cnt();      \
@@ -6890,6 +6893,47 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 				OP_CASE(MRET) {
 					return_from_trap_handler(MachineMode);
 					stats.inc_mret();
+				}
+				OP_END();
+
+				// Mojo V
+				OP_CASE(LDE) {
+					stats.inc_loadstore();
+					uxlen_t addr = regs[instr.rs1()] + instr.I_imm();
+					trap_check_addr_alignment<4, true>(addr);
+					uint64_t value = lscache.load_word(addr);
+					// TODO MojoV decode logic
+					regs[instr.rd()] = value;
+					reset_reg_zero();
+				}
+				OP_END();
+
+				OP_CASE(SDE) {
+					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
+					trap_check_addr_alignment<4, false>(addr);
+					// TODO MojoV encode logic
+					uint64_t value = regs[instr.rs2()]
+					lscache.store_word(addr, value);
+				}
+				OP_END();
+
+				OP_CASE(FLDE) {
+					stats.inc_loadstore();
+					uxlen_t addr = regs[instr.rs1()] + instr.I_imm();
+					trap_check_addr_alignment<4, true>(addr);
+					uint64_t value = lscache.load_word(addr);
+					// TODO MojoV decode logic
+					regs[instr.rd()] = value;
+					reset_reg_zero();
+				}
+				OP_END();
+
+				OP_CASE(FSDE) {
+					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
+					trap_check_addr_alignment<4, false>(addr);
+					// TODO MojoV encode logic
+					uint64_t value = regs[instr.rs2()]
+					lscache.store_word(addr, value);
 				}
 				OP_END();
 			}
