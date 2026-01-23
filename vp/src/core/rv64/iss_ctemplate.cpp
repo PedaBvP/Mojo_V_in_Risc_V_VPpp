@@ -6900,40 +6900,55 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 				OP_CASE(LDE) {
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.I_imm();
-					trap_check_addr_alignment<4, true>(addr);
-					uint64_t value = lscache.load_word(addr);
+					trap_check_addr_alignment<16, true>(addr);
 					// TODO MojoV decode logic
+					MojovFormat fmt = csrs.mojov_cfg.val.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					uxlen_t value;
+					uxlen_t metadata;
+					if(!mojov_load_decrypt(addr, mojov_contract_sig, fmt, value, metadata)){
+						RAISE_MOJOV_SECURITY_VIOLATION();
+					}
 					regs[instr.rd()] = value;
 					reset_reg_zero();
 				}
 				OP_END();
 
 				OP_CASE(SDE) {
-					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
-					trap_check_addr_alignment<4, false>(addr);
 					// TODO MojoV encode logic
-					uint64_t value = regs[instr.rs2()]
-					lscache.store_word(addr, value);
+					stats.inc_loadstore();
+					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
+					trap_check_addr_alignment<16, false>(addr);
+					MojovFormat fmt = csrs.mojov_cfg.val.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					uxlen_t plaintext_val = regs[instr.rs2()];
+					uxlen_t metadata = 0;
+					mojov_store_encrypted(addr, plaintext_val, mojov_contract_sig, fmt, metadata);
 				}
 				OP_END();
 
 				OP_CASE(FLDE) {
+					// TODO MojoV decode logic
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.I_imm();
-					trap_check_addr_alignment<4, true>(addr);
-					uint64_t value = lscache.load_word(addr);
-					// TODO MojoV decode logic
-					regs[instr.rd()] = value;
-					reset_reg_zero();
+					trap_check_addr_alignment<16, true>(addr);
+					MojovFormat fmt = csrs.mojov_cfg.val.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					uxlen_t value;
+					uxlen_t metadata;
+					if(!mojov_load_decrypt(addr, mojov_contract_sig, fmt, value, metadata)){
+						RAISE_MOJOV_SECURITY_VIOLATION();
+					}
+					fp_regs.write(RD, float64_t{(uint64_t)value});
 				}
 				OP_END();
 
 				OP_CASE(FSDE) {
-					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
-					trap_check_addr_alignment<4, false>(addr);
 					// TODO MojoV encode logic
-					uint64_t value = regs[instr.rs2()]
-					lscache.store_word(addr, value);
+					stats.inc_loadstore();
+					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
+					trap_check_addr_alignment<16, false>(addr);
+					MojovFormat fmt = csrs.mojov_cfg.val.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					uxlen_t plaintext_val = fp_regs.f64(RS2).v;
+					uxlen_t metadata = 0;
+					mojov_store_encrypted(addr, plaintext_val, mojov_contract_sig, fmt, metadata);
 				}
 				OP_END();
 			}
@@ -7302,7 +7317,7 @@ void ISS_CT::set_csr_value(uxlen_t addr, uxlen_t value) {
 	maybe_interrupt_pending();
 }
 
-// MojoV
+// Mojo V methods start
 
 void ISS_CT::install_contract() {
     uint128_t sig = (uint128_t)mojov_keycfg_buf[0] | ((uint128_t)mojov_keycfg_buf[1] << 64);
@@ -7338,6 +7353,212 @@ void ISS_CT::install_contract() {
 	mojov_salt = salt;
 	mojov_ciphers_active = ciphers;
 }
+
+struct AeadResultFast {
+    uint64_t ciphertext;
+    uint32_t tag;
+};
+
+struct AeadResultStrong {
+    uint64_t c_val;
+    uint64_t tag;
+    uint64_t c_metadata;
+};
+
+enum class MojovFormat : uint8_t { Fast = 0, Strong = 1 };
+
+// TODO Mojo V add Proofcarying
+
+
+__always_inline void ISS_CT::mojov_store_encrypted(
+    uint64_t addr,
+    uint64_t plaintext_val,
+    uint64_t contract_sig,
+    MojovFormat fmt,
+    uint64_t metadata)
+{
+    // 128-bit alignment
+    if (addr & 0xF) { RAISE_MOJOV_SECURITY_VIOLATION(); return; }
+
+    const uint128_t key = mojov_sym_key;
+
+    switch (fmt) {
+        case MojovFormat::Fast: {
+            // salt 32-bit, tag 32-bit, total 16 bytes
+            const uint32_t salt = trng_u32();
+            const auto out = mojov_aead_encrypt_fast(key, salt, plaintext_val,
+                                                     static_cast<uint32_t>(contract_sig));
+            lscache.store_double(addr + 0, out.c_val);
+            lscache.store_word(addr + 8, salt);
+            lscache.store_word(addr + 12, out.tag);
+            return;
+        }
+
+        case MojovFormat::Strong: {
+            // salt 64-bit, tag 64-bit, metadata 64-bit, total 32 bytes
+            const uint64_t salt = 0x123456();
+            const auto out = mojov_aead_encrypt_strong(key, salt, plaintext_val,
+                                                       contract_sig, metadata);
+            lscache.store_double(addr + 0,  out.c_val);
+            lscache.store_double(addr + 8,  salt);
+            lscache.store_double(addr + 16, out.tag);
+            lscache.store_double(addr + 24, out.c_metadata);
+            return;
+        }
+    }
+}
+
+__always_inline bool ISS_CT::mojov_load_decrypt(
+    uint64_t addr,
+    uint64_t contract_sig_expected,
+    MojovFormat fmt,
+    uint64_t &out_val,
+    uint64_t &out_metadata )
+{
+    if (addr & 0xF) return false;
+
+    const uint128_t key = mojov_sym_key;
+
+    switch (fmt) {
+        case MojovFormat::Fast: {
+            const uint64_t low  = lscache.load_double(addr + 0);
+            const uint64_t high = lscache.load_double(addr + 8);
+            const uint32_t salt = uint32_t(high & 0xFFFFFFFFu);
+            const uint32_t tag  = uint32_t(high >> 32);
+
+            uint64_t val;
+            const bool ok = mojov_aead_decrypt_fast(key, salt, low,
+                                                    static_cast<uint32_t>(contract_sig_expected),
+                                                    tag, val);
+            if (!ok) return false;
+            out_val = val;
+            out_metadata = 0;
+            return true;
+        }
+
+        case MojovFormat::Strong: {
+            const uint64_t c_val      = lscache.load_double(addr + 0);
+            const uint64_t salt       = lscache.load_double(addr + 8);
+            const uint64_t tag        = lscache.load_double(addr + 16);
+            const uint64_t c_metadata = lscache.load_double(addr + 24);
+
+            uint64_t val, meta;
+            const bool ok = mojov_aead_decrypt_strong(key, salt, c_val,
+                                                      contract_sig_expected, tag,
+                                                      c_metadata, val, meta);
+            if (!ok) return false;
+            out_val = val;
+            out_metadata = meta;
+            return true;
+        }
+    }
+    return false;
+}
+
+AeadResultFast ISS_CT::mojov_aead_encrypt_fast(
+        uint128_t key,
+        uint32_t salt,
+        uint64_t plaintext,
+        uint32_t contract_sig)
+{
+    uint64_t k0 = key_lo(key);
+    uint64_t k1 = key_hi(key);
+
+    uint64_t c = plaintext ^ k0 ^ (uint64_t)salt;
+    uint32_t t = (uint32_t)((c ^ (uint64_t)contract_sig ^ k1) & 0xffffffffu);
+
+    return { c, t };
+}
+
+bool ISS_CT::mojov_aead_decrypt_fast(
+        uint128_t key,
+        uint32_t salt,
+        uint64_t ciphertext,
+        uint32_t contract_sig,
+        uint32_t tag,
+        uint64_t &out_plaintext)
+{
+    uint64_t k0 = key_lo(key);
+    uint64_t k1 = key_hi(key);
+
+    uint32_t expected =
+        (uint32_t)((ciphertext ^ (uint64_t)contract_sig ^ k1) & 0xffffffffu);
+
+    if (expected != tag)
+        return false;
+
+    out_plaintext = ciphertext ^ k0 ^ (uint64_t)salt;
+    return true;
+}
+
+
+AeadResultStrong ISS_CT::mojov_aead_encrypt_strong(
+        uint128_t key,
+        uint64_t salt,
+        uint64_t plaintext_val,
+        uint64_t contract_sig,
+        uint64_t metadata)
+{
+    uint64_t k0 = key_lo(key);
+    uint64_t k1 = key_hi(key);
+
+    uint64_t c_val      = plaintext_val ^ k0 ^ salt;
+    uint64_t c_metadata = metadata      ^ k1 ^ (salt << 1);
+
+    uint64_t tag =
+          c_val
+        ^ c_metadata
+        ^ salt
+        ^ contract_sig
+        ^ k0
+        ^ (k1 << 1);
+
+    return { c_val, tag, c_metadata };
+}
+
+bool ISS_CT::mojov_aead_decrypt_strong(
+        uint128_t key,
+        uint64_t salt,
+        uint64_t c_val,
+        uint64_t contract_sig,
+        uint64_t tag,
+        uint64_t c_metadata,
+        uint64_t &out_plaintext_val,
+        uint64_t &out_metadata)
+{
+    uint64_t k0 = key_lo(key);
+    uint64_t k1 = key_hi(key);
+
+    uint64_t expected =
+          c_val
+        ^ c_metadata
+        ^ salt
+        ^ contract_sig
+        ^ k0
+        ^ (k1 << 1);
+
+    if (expected != tag)
+        return false;
+
+    out_plaintext_val = c_val      ^ k0 ^ salt;
+    out_metadata      = c_metadata ^ k1 ^ (salt << 1);
+
+    return true;
+}
+
+
+
+__always_inline uint64_t key_lo(uint128_t k) {
+    return (uint64_t)k;
+}
+
+__always_inline uint64_t key_hi(uint128_t k) {
+    return (uint64_t)(k >> 64);
+}
+
+
+
+// Mojo V methods End
 
 void ISS_CT::init(instr_memory_if *instr_mem, bool use_dbbcache, data_memory_if *data_mem, bool use_lscache,
                   clint_if *clint, uxlen_t entrypoint, uxlen_t sp_base) {

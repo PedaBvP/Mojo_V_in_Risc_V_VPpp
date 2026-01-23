@@ -284,6 +284,10 @@ class DBBCacheDummy_T : public DBBCacheBase_T<arch, T_uxlen_t, T_instr_memory_if
 		this->pc = pc;
 		if(mojoV_enabled){
 			mojov_security_validation(opId, instr);
+		}else{
+			if(opId == SDE || opId == FSDE || opId == LDE || opId == FLDE){
+				raise_trap(EXC_MOJOV_SECURITY_VIOLATION, instr.data());
+			}
 		}
 
 		cycle_counter_raw += this->opMap[opId].instr_time;
