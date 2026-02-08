@@ -277,7 +277,16 @@ class DBBCacheDummy_T : public DBBCacheBase_T<arch, T_uxlen_t, T_instr_memory_if
 
 	__always_inline void abort_fetch_decode_fast() {}
 
-	__always_inline void *fetch_decode(T_uxlen_t &pc, Instruction &instr, bool mojoV_enabled) {
+	__always_inline void *fetch_decode(T_uxlen_t &pc, Instruction &instr) {
+		Operation::OpId opId;
+		this->last_pc = this->pc;
+		this->mem_word = fetch_decode(pc, instr, opId);
+		this->pc = pc;
+		cycle_counter_raw += this->opMap[opId].instr_time;
+		return this->opMap[opId].labelPtr;
+	}
+
+	__always_inline void *fetch_decode_mojov(T_uxlen_t &pc, Instruction &instr, bool mojoV_enabled) {
 		Operation::OpId opId;
 		this->last_pc = this->pc;
 		this->mem_word = fetch_decode(pc, instr, opId);
@@ -285,7 +294,7 @@ class DBBCacheDummy_T : public DBBCacheBase_T<arch, T_uxlen_t, T_instr_memory_if
 		if(mojoV_enabled){
 			mojov_security_validation(opId, instr);
 		}else{
-			if(opId == SDE || opId == FSDE || opId == LDE || opId == FLDE){
+			if(opId == Operation::SDE || opId == Operation::FSDE || opId == Operation::LDE || opId == Operation::FLDE){
 				raise_trap(EXC_MOJOV_SECURITY_VIOLATION, instr.data());
 			}
 		}
@@ -294,7 +303,9 @@ class DBBCacheDummy_T : public DBBCacheBase_T<arch, T_uxlen_t, T_instr_memory_if
 		return this->opMap[opId].labelPtr;
 	}
 
+
 	__always_inline void mojov_security_validation(Operation::OpId opId, Instruction& instr){
+		using namespace Operation;
 		auto raise_mojov_trap = [&]() { raise_trap(EXC_MOJOV_SECURITY_VIOLATION, instr.data()); };
 		bool is_rd_secret = is_secret(instr.rd());
 		bool is_rs1_secret = is_secret(instr.rs1());
@@ -306,22 +317,20 @@ class DBBCacheDummy_T : public DBBCacheBase_T<arch, T_uxlen_t, T_instr_memory_if
 		switch (opId) {
         	case SDE:
         	case FSDE:
-        	    if (!rs1_secret && rs2_secret) return;
+        	    if (!is_rs1_secret && is_rs2_secret) return;
         	    raise_mojov_trap();
         	    return;
 
         	case LDE:
         	case FLDE:
-        	    if (!rs1_secret && rd_secret) return;
+        	    if (!is_rs1_secret && is_rd_secret) return;
         	    raise_mojov_trap();
         	    return;
 			case FLD:
-			case FLDE:
 			case FLW:
 			case LB:
 			case LBU:
 			case LD:
-			case LDE:
 			case LH:
 			case LHU:
 			case LR_D:
@@ -345,7 +354,7 @@ class DBBCacheDummy_T : public DBBCacheBase_T<arch, T_uxlen_t, T_instr_memory_if
 		}
 
 		// spec specific restrictions
-		if(instr.opcode() == OP_AMO){
+		if(instr.opcode() == Instruction::OP_AMO){
 			raise_mojov_trap();
 			return;
 		}
@@ -1171,7 +1180,7 @@ class DBBCache_T : public DBBCacheBase_T<arch, T_uxlen_t, T_instr_memory_if> {
 		stats.inc_fast_abort();
 	}
 
-	__always_inline void *fetch_decode(T_uxlen_t &pc, Instruction &instr) {
+	__always_inline void *fetch_decode(T_uxlen_t &pc, Instruction &instr, bool mojov_en = false) {
 		stats.inc_cnt();
 
 #ifdef DBBCACHE_ENABLE_CHECKS
@@ -1214,6 +1223,13 @@ class DBBCache_T : public DBBCacheBase_T<arch, T_uxlen_t, T_instr_memory_if> {
 			dummyBlock.entries[0].pc = last_pc;
 			/* save mem_word for get_mem_word */
 			this->mem_word = fetch_decode(pc, instr, opId);
+			if(mojov_en){
+				mojov_security_validation(opId, instr);
+			}else{
+				if(opId == Operation::SDE || opId == Operation::FSDE || opId == Operation::LDE || opId == Operation::FLDE){
+					raise_trap(EXC_MOJOV_SECURITY_VIOLATION, instr.data());
+				}
+			}
 			dummyBlock.entries[0].pc_increment = pc - last_pc;
 
 			/* update block cycle counter -> see comments in decode_update_entry above */
@@ -1329,6 +1345,94 @@ class DBBCache_T : public DBBCacheBase_T<arch, T_uxlen_t, T_instr_memory_if> {
 		instr = Instruction(curEntry->instr);
 		pc += curEntry->pc_increment;
 		return curEntry->opLabelPtr;
+	}
+
+	__always_inline void mojov_security_validation(Operation::OpId opId, Instruction& instr){
+		using namespace Operation;
+		auto raise_mojov_trap = [&]() { raise_trap(EXC_MOJOV_SECURITY_VIOLATION, instr.data()); };
+		bool is_rd_secret = is_secret(instr.rd());
+		bool is_rs1_secret = is_secret(instr.rs1());
+		bool is_rs2_secret = is_secret(instr.rs2());
+		// only allowed to be used when Type == R4
+		bool is_rs3_secret = is_secret(instr.rs3());
+
+		// mojoV, load + jump and special case handling
+		switch (opId) {
+        	case SDE:
+        	case FSDE:
+        	    if (!is_rs1_secret && is_rs2_secret) return;
+        	    raise_mojov_trap();
+        	    return;
+
+        	case LDE:
+        	case FLDE:
+        	    if (!is_rs1_secret && is_rd_secret) return;
+        	    raise_mojov_trap();
+        	    return;
+			case FLD:
+			case FLW:
+			case LB:
+			case LBU:
+			case LD:
+			case LH:
+			case LHU:
+			case LR_D:
+			case LR_W:
+			case LW:
+			case LWU:
+			case JR:
+			case JALR:
+				if(is_rs1_secret) raise_mojov_trap();
+				return;
+			case CSRRS:
+			case CSRRW:
+			case CSRRC:
+				if(is_rd_secret || is_rs1_secret) raise_mojov_trap();
+				return;
+			case SFENCE_VMA:
+				if(is_rs1_secret || is_rs2_secret) raise_mojov_trap();
+				return;
+			default:
+				break;
+		}
+
+		// spec specific restrictions
+		if(instr.opcode() == Instruction::OP_AMO){
+			raise_mojov_trap();
+			return;
+		}
+
+		// type mapping
+		switch(Operation::getType(opId)){
+			case Operation::Type::R:
+				if((is_rs1_secret || is_rs2_secret) && !is_rd_secret){
+					raise_mojov_trap();
+				}
+				break;
+
+			case Operation::Type::I:
+				if(is_rs1_secret && !is_rd_secret){
+					raise_mojov_trap();
+				}
+				break;
+			case Operation::Type::S:
+			case Operation::Type::B:
+				if((is_rs1_secret || is_rs2_secret)){
+					raise_mojov_trap();
+				}
+				break;
+			case Operation::Type::R4:
+				if((is_rs1_secret || is_rs2_secret || is_rs3_secret) && !is_rd_secret){
+					raise_mojov_trap();
+				}
+				break;
+			default:
+				break;
+		}
+	}
+
+	__always_inline bool is_secret(uint32_t reg){
+		return 24 <= reg && reg <= 31;
 	}
 
 	__always_inline T_uxlen_t get_last_pc_before_callback() {

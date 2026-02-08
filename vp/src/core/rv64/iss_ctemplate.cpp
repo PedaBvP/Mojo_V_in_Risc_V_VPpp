@@ -34,6 +34,13 @@ typedef __uint128_t uint128_t;
 #define RS2 instr.rs2()
 #define RS3 instr.rs3()
 
+uint64_t mojov_keycfg_buf[8] = {0};
+uint8_t  mojov_keycfg_idx = 0;
+uint128_t mojov_sym_key = 0;
+uint64_t mojov_contract_sig = 0;
+uint64_t mojov_salt = 0;
+uint64_t mojov_ciphers_active = 0;
+
 ISS_CT::ISS_CT(RV_ISA_Config *isa_config, uxlen_t hart_id)
     : isa_config(isa_config), stats(hart_id), v_ext(*this), systemc_name("Core-" + std::to_string(hart_id)) {
 	csrs.mhartid.reg.val = hart_id;
@@ -203,25 +210,25 @@ void *ISS_CT::genOpMap() {
 	return OP_GLOBAL_FAST_ABORT_AND_FDD_LABEL_START;
 }
 
-#define OP_SLOW_FDD()                                                       						\
-	assert(((pc & ~pc_alignment_mask()) == 0) && "misaligned instruction"); 						\
-	stats.inc_cnt();                                                        						\
-	stats.inc_slow_fdd();                                                   						\
-	void *opLabelPtr = dbbcache.fetch_decode(pc, instr, csrs.mojov_cfg.reg.fields.mojov_en);        \
-	if (trace) {                                                            						\
-		print_trace();                                                      						\
-		/* always stay in slow path if trace enabled */                     						\
-		force_slow_path();                                                  						\
-	}                 																				\
-	if(csrs.mojov_cfg.reg.fields.mojov_en){															\
-		force_slow_path();																			\
-	}																								\
+#define OP_SLOW_FDD()                                                       								\
+	assert(((pc & ~pc_alignment_mask()) == 0) && "misaligned instruction"); 								\
+	stats.inc_cnt();                                                        								\
+	stats.inc_slow_fdd();                                                   								\
+	void *opLabelPtr = dbbcache.fetch_decode(pc, instr, (bool)this->csrs.mojov_cfg.reg.fields.mojov_en);	\
+	if (trace) {                                                            								\
+		print_trace();                                                      								\
+		/* always stay in slow path if trace enabled */                     								\
+		force_slow_path();                                                  								\
+	}                 																						\
+	if(csrs.mojov_cfg.reg.fields.mojov_en){																	\
+		force_slow_path();																					\
+	}																										\
 	goto *opLabelPtr;
 
 #define OP_MED_FDD()     \
 	stats.inc_cnt();     \
 	stats.inc_med_fdd(); \
-	goto *dbbcache.fetch_decode(pc, instr, csrs.mojov_cfg.reg.fields.mojov_en);
+    goto *dbbcache.fetch_decode(pc, instr, (bool)this->csrs.mojov_cfg.reg.fields.mojov_en);
 
 #define OP_FAST_FDD()     \
 	stats.inc_cnt();      \
@@ -6902,7 +6909,7 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 					uxlen_t addr = regs[instr.rs1()] + instr.I_imm();
 					trap_check_addr_alignment<16, true>(addr);
 					// TODO MojoV decode logic
-					MojovFormat fmt = csrs.mojov_cfg.val.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					MojovFormat fmt = csrs.mojov_cfg.reg.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
 					uxlen_t value;
 					uxlen_t metadata;
 					if(!mojov_load_decrypt(addr, mojov_contract_sig, fmt, value, metadata)){
@@ -6918,7 +6925,7 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
 					trap_check_addr_alignment<16, false>(addr);
-					MojovFormat fmt = csrs.mojov_cfg.val.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					MojovFormat fmt = csrs.mojov_cfg.reg.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
 					uxlen_t plaintext_val = regs[instr.rs2()];
 					uxlen_t metadata = 0;
 					mojov_store_encrypted(addr, plaintext_val, mojov_contract_sig, fmt, metadata);
@@ -6930,7 +6937,7 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.I_imm();
 					trap_check_addr_alignment<16, true>(addr);
-					MojovFormat fmt = csrs.mojov_cfg.val.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					MojovFormat fmt = csrs.mojov_cfg.reg.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
 					uxlen_t value;
 					uxlen_t metadata;
 					if(!mojov_load_decrypt(addr, mojov_contract_sig, fmt, value, metadata)){
@@ -6945,7 +6952,7 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
 					trap_check_addr_alignment<16, false>(addr);
-					MojovFormat fmt = csrs.mojov_cfg.val.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					MojovFormat fmt = csrs.mojov_cfg.reg.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
 					uxlen_t plaintext_val = fp_regs.f64(RS2).v;
 					uxlen_t metadata = 0;
 					mojov_store_encrypted(addr, plaintext_val, mojov_contract_sig, fmt, metadata);
@@ -7277,8 +7284,8 @@ void ISS_CT::set_csr_value(uxlen_t addr, uxlen_t value) {
 
 			if((value & MOJOV_CFG_WRITE_MASK) == 0x0){
 				for(int i = 24; i < 32; i++){
-					regs[i] = 0;
-					fp_regs[i] = 0;
+					regs[i] = 0x0;
+					fp_regs.write(i, float64_t{0x0});
 				}
 			}
 			break;
@@ -7300,7 +7307,7 @@ void ISS_CT::set_csr_value(uxlen_t addr, uxlen_t value) {
 			break;
 
 		case MOJOV_KEYSTATE_ADDR:
-			csrs.mojov_keystate = value;
+			csrs.mojov_keystate.reg.val = value;
 			break;
 
 
@@ -7331,7 +7338,7 @@ void ISS_CT::install_contract() {
     uint8_t  format_sel   = (uint8_t)(mojov_keycfg_buf[7] & 0xFF);
 
 	bool correct_sig = memcmp(sig_bytes, "Mojo-V ver. #001", 16) == 0;
-	bool correct_ciphers = (__builtin_popcountll(ciphers) == 2) && ((ciphers & csrs.mojov_ciphers.reg.val) == ciphers);
+	bool correct_ciphers = (__builtin_popcountll(ciphers) == 2); // && ((ciphers & csrs.mojov_ciphers.reg.val) == ciphers)
 	bool correct_format_sel = format_sel == 0x0 || format_sel == 0x1 || format_sel == 0x2;
 
 
@@ -7340,13 +7347,13 @@ void ISS_CT::install_contract() {
     csrs.mojov_cfg.reg.fields.mojov_en  = 0;
     RAISE_MOJOV_SECURITY_VIOLATION();
     return;
-}
+	}
 
 
 
 	csrs.mojov_cfg.reg.fields.format_sel = format_sel;
 	csrs.mojov_cfg.reg.fields.key_valid = 1;
-	set_csr_value(MOJOV_CFG_ADDR, 0x0);
+	set_csr_value(rv64::csr::MOJOV_CFG_ADDR, 0x0);
 
 	mojov_sym_key = sym_key_128;
 	mojov_contract_sig = contract_sig;
@@ -7354,18 +7361,7 @@ void ISS_CT::install_contract() {
 	mojov_ciphers_active = ciphers;
 }
 
-struct AeadResultFast {
-    uint64_t ciphertext;
-    uint32_t tag;
-};
 
-struct AeadResultStrong {
-    uint64_t c_val;
-    uint64_t tag;
-    uint64_t c_metadata;
-};
-
-enum class MojovFormat : uint8_t { Fast = 0, Strong = 1 };
 
 // TODO Mojo V add Proofcarying
 
@@ -7385,7 +7381,7 @@ __always_inline void ISS_CT::mojov_store_encrypted(
     switch (fmt) {
         case MojovFormat::Fast: {
             // salt 32-bit, tag 32-bit, total 16 bytes
-            const uint32_t salt = trng_u32();
+            const uint32_t salt = 0x123456;
             const auto out = mojov_aead_encrypt_fast(key, salt, plaintext_val,
                                                      static_cast<uint32_t>(contract_sig));
             lscache.store_double(addr + 0, out.c_val);
@@ -7396,7 +7392,7 @@ __always_inline void ISS_CT::mojov_store_encrypted(
 
         case MojovFormat::Strong: {
             // salt 64-bit, tag 64-bit, metadata 64-bit, total 32 bytes
-            const uint64_t salt = 0x123456();
+            const uint64_t salt = 0x123456;
             const auto out = mojov_aead_encrypt_strong(key, salt, plaintext_val,
                                                        contract_sig, metadata);
             lscache.store_double(addr + 0,  out.c_val);
@@ -7455,7 +7451,7 @@ __always_inline bool ISS_CT::mojov_load_decrypt(
     return false;
 }
 
-AeadResultFast ISS_CT::mojov_aead_encrypt_fast(
+rv64::AeadResultFast ISS_CT::mojov_aead_encrypt_fast(
         uint128_t key,
         uint32_t salt,
         uint64_t plaintext,
@@ -7492,7 +7488,7 @@ bool ISS_CT::mojov_aead_decrypt_fast(
 }
 
 
-AeadResultStrong ISS_CT::mojov_aead_encrypt_strong(
+rv64::AeadResultStrong ISS_CT::mojov_aead_encrypt_strong(
         uint128_t key,
         uint64_t salt,
         uint64_t plaintext_val,
@@ -7548,13 +7544,14 @@ bool ISS_CT::mojov_aead_decrypt_strong(
 
 
 
-__always_inline uint64_t key_lo(uint128_t k) {
-    return (uint64_t)k;
+uint64_t rv64::ISS::key_lo(uint128_t k) {
+    return static_cast<uint64_t>(k);
 }
 
-__always_inline uint64_t key_hi(uint128_t k) {
-    return (uint64_t)(k >> 64);
+uint64_t rv64::ISS::key_hi(uint128_t k) {
+    return static_cast<uint64_t>(k >> 64);
 }
+
 
 
 

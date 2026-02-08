@@ -46,6 +46,7 @@ static constexpr sxlen_t REG32_MIN = INT32_MIN;
 static constexpr sxlen_t REG_MIN = REG64_MIN;
 using RegFile = RegFile_T<sxlen_t, uxlen_t>;
 using data_memory_if = data_memory_if_T<sxlen_t, uxlen_t>;
+using uint128_t = __uint128_t;
 
 inline uxlen_t align_address(uxlen_t addr) {
 	return addr - addr % 8;
@@ -68,12 +69,27 @@ struct PendingInterrupts {
 
 // MojoV
 
-uint64_t mojov_keycfg_buf[8];
-uint8_t mojov_keycfg_idx;
-uint128_t mojov_sym_key;
-uint64_t  mojov_contract_sig;
-uint64_t  mojov_salt;
-uint64_t  mojov_ciphers_active;
+extern uint64_t mojov_keycfg_buf[8];
+extern uint8_t mojov_keycfg_idx;
+extern uint128_t mojov_sym_key;
+extern uint64_t  mojov_contract_sig;
+extern uint64_t  mojov_salt;
+extern uint64_t  mojov_ciphers_active;
+
+
+	
+	struct AeadResultFast {
+	  	uint64_t c_val;
+	  	uint32_t tag;
+	};	
+
+	struct AeadResultStrong {
+	    uint64_t c_val;
+	    uint64_t tag;
+	    uint64_t c_metadata;
+	};
+
+	enum class MojovFormat : uint8_t { Fast = 0, Strong = 1 };
 
 
 /*
