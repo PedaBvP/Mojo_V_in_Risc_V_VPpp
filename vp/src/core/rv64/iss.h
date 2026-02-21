@@ -31,6 +31,7 @@
 #include "core/common/trap.h"
 #include "core/common/v.h"
 #include "csr.h"
+#include "mojov.h"
 #include "util/common.h"
 #include "util/initiator_if.h"
 
@@ -66,31 +67,6 @@ struct PendingInterrupts {
 	PrivilegeLevel target_mode;
 	uxlen_t pending;
 };
-
-// MojoV
-
-extern uint64_t mojov_keycfg_buf[8];
-extern uint8_t mojov_keycfg_idx;
-extern uint128_t mojov_sym_key;
-extern uint64_t  mojov_contract_sig;
-extern uint64_t  mojov_salt;
-extern uint64_t  mojov_ciphers_active;
-
-
-	
-	struct AeadResultFast {
-	  	uint64_t c_val;
-	  	uint32_t tag;
-	};	
-
-	struct AeadResultStrong {
-	    uint64_t c_val;
-	    uint64_t tag;
-	    uint64_t c_metadata;
-	};
-
-	enum class MojovFormat : uint8_t { Fast = 0, Strong = 1 };
-
 
 /*
  * NOTE RVxx.2: C-style macros
