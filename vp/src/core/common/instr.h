@@ -921,6 +921,10 @@ enum OpId {
 	FSDE,
 	FLDE,
 
+	// Zicond
+	CZERO_EQZ,
+	CZERO_NEZ,
+
 	NUMBER_OF_OPERATIONS
 };
 
@@ -1006,6 +1010,11 @@ struct Instruction {
 		F3_SRA = 0b101,
 		F3_OR = 0b110,
 		F3_AND = 0b111,
+		//Zicond
+		F7_CZERO = 0b0000111,
+		F3_EQZ = 0b101,
+		F3_NEZ = 0b111,
+
 
 		F3_MUL = 0b000,
 		F7_MUL = 0b0000001,

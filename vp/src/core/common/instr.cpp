@@ -1682,6 +1682,13 @@ constexpr uint32_t FSDE_ENCODING = 0b00000000000000000011000000001011;
 constexpr uint32_t FLDE_MASK = 0b00000000000000000111000001111111;
 constexpr uint32_t FLDE_ENCODING = 0b00000000000000000010000000001011;
 
+// Zicond
+
+constexpr uint32_t CZERO_EQZ_MASK = 0b11111110000000000111000001111111;
+constexpr uint32_t CZERO_EQZ_ENCODING = 0b00001110000000000101000000110011;
+constexpr uint32_t CZERO_NEZ_MASK = 0b11111110000000000111000001111111;
+constexpr uint32_t CZERO_NEZ_ENCODING = 0b00001110000000000111000000110011;
+
 // RV-V Extension End -- Placeholder 0
 
 /*
@@ -2667,6 +2674,10 @@ std::array<const char *, Operation::OpId::NUMBER_OF_OPERATIONS> Operation::opIdS
 	"LDE",
 	"FSDE",
 	"FLDE",
+
+	// Zicond
+	"CZERO.EQZ",
+	"CZERO.NEZ"
 };
 
 Operation::Type Operation::getType(Operation::OpId opId) {
@@ -2829,6 +2840,8 @@ Operation::Type Operation::getType(Operation::OpId opId) {
 		case FCVT_H_L:
 		case FCVT_H_LU:
 		case VSETVL:
+		case CZERO_EQZ:
+		case CZERO_NEZ:
 			return Type::R;
 
 		case JALR:
@@ -4363,6 +4376,16 @@ Operation::OpId Instruction::decode_normal(Architecture arch, const RV_ISA_Confi
 						case F3_REMU:
 							REQUIRE_ISA(csr_misa::M);
 							MATCH_AND_RETURN_INSTR_OR_NOP(REMU);
+					}
+					break;
+				case F7_CZERO:
+					switch(instr.funct3()){
+						case F3_EQZ:
+							//TODO require isa?
+							MATCH_AND_RETURN_INSTR(CZERO_EQZ);
+						case F3_NEZ:
+							//TODO require isa?
+							MATCH_AND_RETURN_INSTR(CZERO_NEZ);
 					}
 					break;
 			}

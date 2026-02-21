@@ -6900,7 +6900,6 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.I_imm();
 					trap_check_addr_alignment<16, true>(addr);
-					// TODO MojoV decode logic
 					MojovFormat fmt = csrs.mojov_cfg.reg.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
 					uxlen_t value;
 					uxlen_t metadata;
@@ -6913,7 +6912,6 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 				OP_END();
 
 				OP_CASE(SDE) {
-					// TODO MojoV encode logic
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
 					trap_check_addr_alignment<16, false>(addr);
@@ -6925,7 +6923,6 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 				OP_END();
 
 				OP_CASE(FLDE) {
-					// TODO MojoV decode logic
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.I_imm();
 					trap_check_addr_alignment<16, true>(addr);
@@ -6940,7 +6937,6 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 				OP_END();
 
 				OP_CASE(FSDE) {
-					// TODO MojoV encode logic
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
 					trap_check_addr_alignment<16, false>(addr);
@@ -6948,6 +6944,24 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 					uxlen_t plaintext_val = fp_regs.f64(RS2).v;
 					uxlen_t metadata = 0;
 					mojov_store_encrypted(addr, plaintext_val, mojov_contract_sig, fmt, metadata);
+				}
+				OP_END();
+
+				OP_CASE(CZERO_EQZ){
+					if(regs[instr.rs2()] == 0x0){
+						regs[instr.rd()] = 0x0;
+					}else{
+						regs[instr.rd()] = regs[instr.rs1()];
+					}
+				}
+				OP_END();
+				
+				OP_CASE(CZERO_NEZ){
+					if(regs[instr.rs2()] != 0x0){
+						regs[instr.rd()] = 0x0;
+					}else{
+						regs[instr.rd()] = regs[instr.rs1()];
+					}
 				}
 				OP_END();
 			}
