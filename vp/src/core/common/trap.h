@@ -41,7 +41,7 @@ enum ExceptionCode {
 	EXC_CHERI_FAULT = 28,
 
 	// MojoV exception codes
-	EXC_MOJOV_SECURITY_VIOLATION = 41,
+	EXC_MOJOV_SECURITY_VIOLATION = 0x1F,
 };
 
 struct SimulationTrap {

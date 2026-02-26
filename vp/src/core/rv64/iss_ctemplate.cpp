@@ -253,7 +253,8 @@ void *ISS_CT::genOpMap() {
 	OP_LABEL_OP(_op)                                                                                                 \
 	    : static struct op_label_entry OP_LABEL_ENTRY_OP(_op)                                                        \
 	          __attribute__((used, section(OP_LABLE_ENTRIES_SEC_STR))) = {Operation::OpId::_op, &&OP_LABEL_OP(_op)}; \
-	stats.inc_op(Operation::OpId::_op);
+	stats.inc_op(Operation::OpId::_op);																				 \
+	calc_dfhash(Operation::OpId::_op);
 
 #define OP_INVALID_END()                                                                                             \
 	if (trace) {                                                                                                     \
@@ -6900,10 +6901,11 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.I_imm();
 					trap_check_addr_alignment<16, true>(addr);
-					MojovFormat fmt = csrs.mojov_cfg.reg.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					
+					MojovFormat fmt = get_format();
 					uxlen_t value;
-					uxlen_t metadata;
-					if(!mojov_load_decrypt(addr, mojov_contract_sig, fmt, value, metadata)){
+					
+					if(!mojov_load_decrypt(addr, mojov_contract_sig, fmt, value, false)){
 						RAISE_MOJOV_SECURITY_VIOLATION(instr);
 					}
 					regs[instr.rd()] = value;
@@ -6915,10 +6917,9 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
 					trap_check_addr_alignment<16, false>(addr);
-					MojovFormat fmt = csrs.mojov_cfg.reg.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					MojovFormat fmt = get_format();
 					uxlen_t plaintext_val = regs[instr.rs2()];
-					uxlen_t metadata = 0;
-					mojov_store_encrypted(addr, plaintext_val, mojov_contract_sig, fmt, metadata);
+					mojov_store_encrypted(addr, plaintext_val, mojov_contract_sig, fmt, false);
 				}
 				OP_END();
 
@@ -6926,12 +6927,14 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.I_imm();
 					trap_check_addr_alignment<16, true>(addr);
-					MojovFormat fmt = csrs.mojov_cfg.reg.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					
+					MojovFormat fmt = get_format();
 					uxlen_t value;
-					uxlen_t metadata;
-					if(!mojov_load_decrypt(addr, mojov_contract_sig, fmt, value, metadata)){
+					
+					if(!mojov_load_decrypt(addr, mojov_contract_sig, fmt, value, true)){
 						RAISE_MOJOV_SECURITY_VIOLATION(instr);
 					}
+					
 					fp_regs.write(RD, float64_t{(uint64_t)value});
 				}
 				OP_END();
@@ -6940,10 +6943,9 @@ void ISS_CT::exec_steps(const bool debug_single_step) {
 					stats.inc_loadstore();
 					uxlen_t addr = regs[instr.rs1()] + instr.S_imm();
 					trap_check_addr_alignment<16, false>(addr);
-					MojovFormat fmt = csrs.mojov_cfg.reg.fields.format_sel == 0x0 ? MojovFormat::Fast : MojovFormat::Strong;
+					MojovFormat fmt = get_format();
 					uxlen_t plaintext_val = fp_regs.f64(RS2).v;
-					uxlen_t metadata = 0;
-					mojov_store_encrypted(addr, plaintext_val, mojov_contract_sig, fmt, metadata);
+					mojov_store_encrypted(addr, plaintext_val, mojov_contract_sig, fmt, true);
 				}
 				OP_END();
 

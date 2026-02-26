@@ -37,7 +37,7 @@ _start:
     csrw MOJOV_KEYCFG, t4
     csrw MOJOV_KEYCFG, t4
     csrw MOJOV_KEYCFG, 0x3
-    csrw MOJOV_KEYCFG, 0x0
+    csrw MOJOV_KEYCFG, 0x2
        
     
 
@@ -53,15 +53,20 @@ _start:
        ------------------------------------------------------------ */
     # sichere Adresse: Stack
     addi a7, sp, -16
-    li   s10, 0x11223344
+    li   s10, 0x10
 
     # optional sanity: normal store (soll NICHT faulten)
     //sd   s10, 0(a7)
 
     addi s10, s10, 0x1
 
+    addi s10, s10, 0x4
+
     # Mojo-V SDE test
     .insn s 0x0B, 1, s10, 0(a7)
+
+    
+    .insn i 0x0B, 0, s11, 0(a7)
 
     /* PASS: Wenn wir hier ankommen, wurde SDE NICHT geblockt */
     li   a0, 0

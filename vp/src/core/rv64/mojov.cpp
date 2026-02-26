@@ -3,18 +3,26 @@
 
 namespace rv64{
 
+    using Operation::Type;
+    using Operation::OpId;
+
     uint64_t mojov_keycfg_buf[8] = {0};
     uint8_t  mojov_keycfg_idx = 0;
     __uint128_t mojov_sym_key = 0;
     uint64_t mojov_contract_sig = 0;
     uint64_t mojov_salt = 0;
     uint64_t mojov_ciphers_active = 0;
+    uint8_t mojov_format_sel = 0;
+    uint64_t dfHash[8] = {0};
+	uint64_t dfHashFp[8] = {0};
 
-    uint64_t ISS::key_lo(__uint128_t k) {
+
+
+    uint64_t key_lo(__uint128_t k) {
         return static_cast<uint64_t>(k);
     }
 
-    uint64_t ISS::key_hi(__uint128_t k) {
+    uint64_t key_hi(__uint128_t k) {
         return static_cast<uint64_t>(k >> 64);
     }
 
@@ -49,6 +57,7 @@ namespace rv64{
         mojov_contract_sig = contract_sig;
         mojov_salt = salt;
         mojov_ciphers_active = ciphers;
+        mojov_format_sel = format_sel;
     }
 
     void ISS::mojov_store_encrypted(
@@ -56,17 +65,17 @@ namespace rv64{
         uint64_t plaintext_val,
         uint64_t contract_sig,
         MojovFormat fmt,
-        uint64_t metadata)
+        bool fp)
     {
         // 128-bit alignment
         if (addr & 0xF) { RAISE_MOJOV_SECURITY_VIOLATION(instr); return; }
 
         const uint128_t key = mojov_sym_key;
-
         switch (fmt) {
             case MojovFormat::Fast: {
                 // salt 32-bit, tag 32-bit, total 16 bytes
                 const uint32_t salt = 0x123456;
+            
                 const auto out = mojov_aead_encrypt_fast(key, salt, plaintext_val,
                                                         static_cast<uint32_t>(contract_sig));
                 lscache.store_double(addr + 0, out.c_val);
@@ -78,8 +87,29 @@ namespace rv64{
             case MojovFormat::Strong: {
                 // salt 64-bit, tag 64-bit, metadata 64-bit, total 32 bytes
                 const uint64_t salt = 0x123456;
+                
                 const auto out = mojov_aead_encrypt_strong(key, salt, plaintext_val,
-                                                        contract_sig, metadata);
+                                                        contract_sig, 0x0);
+                lscache.store_double(addr + 0,  out.c_val);
+                lscache.store_double(addr + 8,  salt);
+                lscache.store_double(addr + 16, out.tag);
+                lscache.store_double(addr + 24, out.c_metadata);
+                return;
+            }
+
+            case MojovFormat::Proofcarrying:{
+                uint64_t dfHash_val;
+                
+                if(fp){
+                    dfHash_val = dfHashFp[instr.rs2() - 0x18];
+                }else{
+                    dfHash_val = dfHash[instr.rs2() - 0x18];
+                }
+
+                
+                const uint64_t salt = 0x123456;
+                const auto out = mojov_aead_encrypt_strong(key, salt, plaintext_val,
+                                                        contract_sig, dfHash_val);
                 lscache.store_double(addr + 0,  out.c_val);
                 lscache.store_double(addr + 8,  salt);
                 lscache.store_double(addr + 16, out.tag);
@@ -94,7 +124,7 @@ namespace rv64{
         uint64_t contract_sig_expected,
         MojovFormat fmt,
         uint64_t &out_val,
-        uint64_t &out_metadata )
+        bool fp)
     {
         if (addr & 0xF) return false;
 
@@ -107,17 +137,33 @@ namespace rv64{
                 const uint32_t salt = uint32_t(high & 0xFFFFFFFFu);
                 const uint32_t tag  = uint32_t(high >> 32);
 
+                
                 uint64_t val;
                 const bool ok = mojov_aead_decrypt_fast(key, salt, low,
                                                         static_cast<uint32_t>(contract_sig_expected),
                                                         tag, val);
                 if (!ok) return false;
                 out_val = val;
-                out_metadata = 0;
                 return true;
             }
 
             case MojovFormat::Strong: {
+                const uint64_t c_val      = lscache.load_double(addr + 0);
+                const uint64_t salt       = lscache.load_double(addr + 8);
+                const uint64_t tag        = lscache.load_double(addr + 16);
+                const uint64_t c_metadata = lscache.load_double(addr + 24);
+
+                uint64_t val, meta;
+                
+                const bool ok = mojov_aead_decrypt_strong(key, salt, c_val,
+                                                        contract_sig_expected, tag,
+                                                        c_metadata, val, meta);
+                if (!ok) return false;
+                out_val = val;
+                return true;
+            }
+
+            case MojovFormat::Proofcarrying: {
                 const uint64_t c_val      = lscache.load_double(addr + 0);
                 const uint64_t salt       = lscache.load_double(addr + 8);
                 const uint64_t tag        = lscache.load_double(addr + 16);
@@ -129,7 +175,13 @@ namespace rv64{
                                                         c_metadata, val, meta);
                 if (!ok) return false;
                 out_val = val;
-                out_metadata = meta;
+                
+                if(fp){
+                    dfHashFp[instr.rd()-0x18] = meta;
+                }else{
+                    dfHash[instr.rd()-0x18] = meta;
+                }
+
                 return true;
             }
         }
@@ -137,7 +189,7 @@ namespace rv64{
     }
 
 
-    AeadResultFast ISS::mojov_aead_encrypt_fast(
+    AeadResultFast mojov_aead_encrypt_fast(
             uint128_t key,
             uint32_t salt,
             uint64_t plaintext,
@@ -152,7 +204,7 @@ namespace rv64{
         return { c, t };
     }
 
-    bool ISS::mojov_aead_decrypt_fast(
+    bool mojov_aead_decrypt_fast(
             uint128_t key,
             uint32_t salt,
             uint64_t ciphertext,
@@ -174,7 +226,7 @@ namespace rv64{
     }
 
 
-    AeadResultStrong ISS::mojov_aead_encrypt_strong(
+    AeadResultStrong mojov_aead_encrypt_strong(
             uint128_t key,
             uint64_t salt,
             uint64_t plaintext_val,
@@ -198,7 +250,7 @@ namespace rv64{
         return { c_val, tag, c_metadata };
     }
 
-    bool ISS::mojov_aead_decrypt_strong(
+    bool mojov_aead_decrypt_strong(
             uint128_t key,
             uint64_t salt,
             uint64_t c_val,
@@ -226,5 +278,280 @@ namespace rv64{
         out_metadata      = c_metadata ^ k1 ^ (salt << 1);
 
         return true;
+    }
+
+
+    uint32_t get_mask(Operation::Type type){
+        switch(type){
+            case(Type::R):
+                return 0b11111110000000000111000001111111;
+            case(Type::I):
+            case(Type::S):
+                return 0b00000000000000000111000001111111;
+            case(Type::B):
+            case(Type::U):
+            case(Type::J):
+                return 0b00000000000000000000000001111111;
+            case(Type::R4):
+                return 0b00000110000000000111000001111111;
+            default:
+                return 0b00000000000000000000000000000000;
+        }
+    }
+
+    uint32_t get_encoding_mask(Type type){
+        switch(type){
+            case(Type::R):
+                return 0b11111110000000000111000001111111;
+            case(Type::R4):
+                return 0b11111110000000000111000001111111;
+            case(Type::I):
+                return 0b11111111111100000111000001111111;
+            case(Type::S):
+            case(Type::B):
+                return 0b11111110000000000111111111111111;
+            case(Type::U):
+            case(Type::J):
+                return 0b11111111111111111111000001111111;
+            default:
+                return 0b00000000000000000000000000000000;
+        }
+    }
+
+	uint64_t get_opcode_descriptor(OpId opId, Instruction instr){
+        Type type = getType(opId);
+        uint32_t mask = get_mask(type);
+        uint32_t encoding = mask & instr.data();
+        if(opId == Operation::LDE || opId == Operation::SDE || opId == Operation::FLDE || opId == Operation::FSDE){
+            return ((uint64_t)mask >> 32) | encoding;
+        }
+
+        uint32_t encoding_mask = get_encoding_mask(type);
+        return ((uint64_t)mask >> 32) | (encoding_mask & instr.data());
+    }
+
+    
+	bool is_secret(uint32_t reg){
+        return 24 <= reg && reg <= 31;
+    }
+
+    uint64_t ISS::reg_value(uint32_t reg){
+        if(is_secret(reg)){
+            return dfHash[(reg-0x18)];
+        }
+        return regs[reg];
+    }
+
+    uint64_t ISS::fpReg_value(uint32_t reg){
+        if(is_secret(reg)){
+            return dfHashFp[(reg-0x18)];
+        }
+        return  fp_regs.f64(reg).v;
+    }
+    
+	void ISS::get_reg_values(Type type, uint64_t &rs1, uint64_t &rs2)
+    {
+        switch(type){
+            case(Type::R):
+            case(Type::S):
+            case(Type::B):
+                rs1 = reg_value(instr.rs1());
+                rs2 = reg_value(instr.rs2());
+                break;
+            case(Type::I):
+                rs1 = reg_value(instr.rs1());
+                break;
+            default:
+                rs1 = 0x0;
+                rs2 = 0x0;
+        }
+    }
+
+    void ISS::get_fpReg_values(Type type, uint64_t &rs1, uint64_t &rs2, uint64_t &rs3)
+    {
+        switch(type){
+            case(Type::R):
+            case(Type::S):
+            case(Type::B):
+                rs1 = fpReg_value(instr.rs1());
+                rs2 = fpReg_value(instr.rs2());
+                break;
+            case(Type::I):
+                rs1 = fpReg_value(instr.rs1());
+                break;
+            case(Type::R4):
+                rs1 = fpReg_value(instr.rs1());
+                rs2 = fpReg_value(instr.rs2());
+                rs3 = fpReg_value(instr.rs3());
+                break;
+            default:
+                rs1 = 0x0;
+                rs2 = 0x0;
+                rs3 = 0x0;
+        }
+    }
+
+    uint64_t splitHash(uint64_t opcode_desc, uint64_t rs1, uint64_t rs2, uint64_t rs3){
+        return opcode_desc ^ rs1 ^ rs2 ^ rs3;
+    }
+
+
+    void ISS::calc_dfhash(OpId opId){
+        if((!is_secret(instr.rd()) || mojov_format_sel != 0x2)){
+            return;
+        }
+
+        Type type = getType(opId);
+        bool is_fp = is_fp_op(opId);
+        uint32_t pReg = instr.rd() - 0x18;
+        uint64_t rs1 = 0x0;
+        uint64_t rs2 = 0x0;
+        uint64_t rs3 = 0x0;
+
+        if(is_fp){
+            get_fpReg_values(type, rs1, rs2, rs3);
+        }else{
+            get_reg_values(type, rs1, rs2);
+        }
+
+
+
+        uint64_t opcode_desc = get_opcode_descriptor(opId, instr);
+
+        uint64_t dfHash_val = splitHash(opcode_desc, rs1, rs2, rs3);
+
+        if(is_fp){
+            dfHashFp[pReg] = dfHash_val;
+        }else{
+            dfHash[pReg] = dfHash_val;
+        }
+    }
+
+    // void init_dfHash(OpId opId){
+    //     currOpId = opId;
+    // }
+
+    MojovFormat get_format(){
+        switch(mojov_format_sel){
+            case(0x0):
+                return MojovFormat::Fast;
+            case(0x1):
+                return MojovFormat::Strong;
+            case(0x2):
+                return MojovFormat::Proofcarrying;
+            default:
+                return MojovFormat::Fast;
+        }
+    }
+
+
+    bool is_fp_op(OpId opId){
+        switch(opId){
+            // RV32Zfh standard extension
+            case Operation::FLH:
+            case Operation::FSH:
+            case Operation::FMADD_H:
+            case Operation::FMSUB_H:
+            case Operation::FNMADD_H:
+            case Operation::FNMSUB_H:
+            case Operation::FADD_H:
+            case Operation::FSUB_H:
+            case Operation::FMUL_H:
+            case Operation::FDIV_H:
+            case Operation::FSQRT_H:
+            case Operation::FSGNJ_H:
+            case Operation::FSGNJN_H:
+            case Operation::FSGNJX_H:
+            case Operation::FMIN_H:
+            case Operation::FMAX_H:
+            case Operation::FCVT_W_H:
+            case Operation::FCVT_WU_H:
+            case Operation::FMV_X_H:
+            case Operation::FEQ_H:
+            case Operation::FLT_H:
+            case Operation::FLE_H:
+            case Operation::FCLASS_H:
+            case Operation::FCVT_H_W:
+            case Operation::FCVT_H_WU:
+            case Operation::FMV_H_X:
+            case Operation::FCVT_S_H:
+            case Operation::FCVT_H_S:
+            case Operation::FCVT_H_D:
+            case Operation::FCVT_D_H:
+            // R64Zfh standard extension
+            case Operation::FCVT_L_H:
+            case Operation::FCVT_LU_H:
+            case Operation::FCVT_H_L:
+            case Operation::FCVT_H_LU:
+            // RV32F standard extension
+            case Operation::FLW:
+            case Operation::FSW:
+            case Operation::FMADD_S:
+            case Operation::FMSUB_S:
+            case Operation::FNMADD_S:
+            case Operation::FNMSUB_S:
+            case Operation::FADD_S:
+            case Operation::FSUB_S:
+            case Operation::FMUL_S:
+            case Operation::FDIV_S:
+            case Operation::FSQRT_S:
+            case Operation::FSGNJ_S:
+            case Operation::FSGNJN_S:
+            case Operation::FSGNJX_S:
+            case Operation::FMIN_S:
+            case Operation::FMAX_S:
+            case Operation::FCVT_W_S:
+            case Operation::FCVT_WU_S:
+            case Operation::FMV_X_W:
+            case Operation::FEQ_S:
+            case Operation::FLT_S:
+            case Operation::FLE_S:
+            case Operation::FCLASS_S:
+            case Operation::FCVT_S_W:
+            case Operation::FCVT_S_WU:
+            case Operation::FMV_W_X:
+            // RV64F standard extension (addition to RV32F)
+            case Operation::FCVT_L_S:
+            case Operation::FCVT_LU_S:
+            case Operation::FCVT_S_L:
+            case Operation::FCVT_S_LU:
+            // RV32D standard extension
+            case Operation::FLD:
+            case Operation::FSD:
+            case Operation::FMADD_D:
+            case Operation::FMSUB_D:
+            case Operation::FNMSUB_D:
+            case Operation::FNMADD_D:
+            case Operation::FADD_D:
+            case Operation::FSUB_D:
+            case Operation::FMUL_D:
+            case Operation::FDIV_D:
+            case Operation::FSQRT_D:
+            case Operation::FSGNJ_D:
+            case Operation::FSGNJN_D:
+            case Operation::FSGNJX_D:
+            case Operation::FMIN_D:
+            case Operation::FMAX_D:
+            case Operation::FCVT_S_D:
+            case Operation::FCVT_D_S:
+            case Operation::FEQ_D:
+            case Operation::FLT_D:
+            case Operation::FLE_D:
+            case Operation::FCLASS_D:
+            case Operation::FCVT_W_D:
+            case Operation::FCVT_WU_D:
+            case Operation::FCVT_D_W:
+            case Operation::FCVT_D_WU:
+            // RV64D standard extension (addition to RV32D)
+            case Operation::FCVT_L_D:
+            case Operation::FCVT_LU_D:
+            case Operation::FMV_X_D:
+            case Operation::FCVT_D_L:
+            case Operation::FCVT_D_LU:
+            case Operation::FMV_D_X:
+                return true;
+            default:
+                return false;
+        }
     }
 }
