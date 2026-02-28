@@ -125,14 +125,14 @@ Local Tests have been added to show the functionality of the Project
 in sw
 ```
 cd simple-mojov-test          # can be replaced with different example
-make TEST=BUBBLE              # (requires RISC-V GNU toolchain in PATH)
-make TEST=BUBBLE sim          # (requires *riscv64-vp*, i.e. *vp/build/bin/riscv64-vp*, executable in PATH)
+make TEST=bubble              # (requires RISC-V GNU toolchain in PATH)
+make TEST=bubble sim          # (requires *riscv64-vp*, i.e. *vp/build/bin/riscv64-vp*, executable in PATH)
 ```
 or
 ```
 cd simple-mojov-test          # can be replaced with different example
-make TEST=SIMPLEMAX              # (requires RISC-V GNU toolchain in PATH)
-make TEST=SIMPLEMAX sim          # (requires *riscv64-vp*, i.e. *vp/build/bin/riscv64-vp*, executable in PATH)
+make TEST=simplemax              # (requires RISC-V GNU toolchain in PATH)
+make TEST=simplemax sim          # (requires *riscv64-vp*, i.e. *vp/build/bin/riscv64-vp*, executable in PATH)
 ```
 ---
 
