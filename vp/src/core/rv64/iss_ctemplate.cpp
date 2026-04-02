@@ -7130,15 +7130,14 @@ uxlen_t ISS_CT::get_csr_value(uxlen_t addr) {
 		case MOJOV_CIPHERS_ADDR:
 			return csrs.mojov_ciphers.reg.val;
 
-		case MOJOV_PUBKEY_ADDR:
-			return csrs.mojov_pubkey.reg.val;
+		case MOJOV_KMSM_ADDR:
+			return csrs.mojov_kmsm_addr.reg.val;
 
-		case MOJOV_KEYCFG_ADDR:
-			RAISE_ILLEGAL_INSTRUCTION();
-			return 0;
+		case MOJOV_KMSM_DATA_ADDR:
+			return csrs.mojov_kmsm_data.reg.val;
 
-		case MOJOV_KEYSTATE_ADDR:
-			return csrs.mojov_keystate.reg.val;
+		case MOJOV_KMSM_CTRL_ADDR:
+			return csrs.mojov_kmsm_ctrl.reg.val;
 
 	}
 
@@ -7283,18 +7282,13 @@ void ISS_CT::set_csr_value(uxlen_t addr, uxlen_t value) {
 		// MojoV Addr:
 
 		case MOJOV_CFG_ADDR:
-			if(csrs.mojov_cfg.reg.fields.key_valid == 1){
+			if(csrs.mojov_cfg.reg.fields.key_valid == 1){	
 				write(csrs.mojov_cfg, MOJOV_CFG_WRITE_MASK);
-			}else{
-				value = 0x0;
-				write(csrs.mojov_cfg, MOJOV_CFG_WRITE_MASK);
-			}
-
-			if((value & MOJOV_CFG_WRITE_MASK) == 0x0){
-				for(int i = 24; i < 32; i++){
-					regs[i] = 0x0;
-					fp_regs.write(i, float64_t{0x0});
+				if(value & 0x1 == 0){
+					// TODO Mojo reset (dfHash + regs)
 				}
+			}else{
+				// TODO Mojo reset (dfHash + regs)
 			}
 			break;
 
@@ -7302,20 +7296,18 @@ void ISS_CT::set_csr_value(uxlen_t addr, uxlen_t value) {
 			RAISE_ILLEGAL_INSTRUCTION();
 			break;
 
-		case MOJOV_PUBKEY_ADDR:
-			RAISE_ILLEGAL_INSTRUCTION();
+		case MOJOV_KMSM_ADDR:
+			csrs.mojov_kmsm_addr = value;
 			break;
 
-		case MOJOV_KEYCFG_ADDR:
-			mojov_keycfg_buf[mojov_keycfg_idx++] = value;
-			if(mojov_keycfg_idx == 8){
-				install_contract();
-				mojov_keycfg_idx = 0;
+		case MOJOV_KMSM_DATA_ADDR:
+			csrs.mojov_kmsm_data = value;
+			break;
+
+		case MOJOV_KMSM_CTRL_ADDR:
+			if(value & 0x1){
+				// TODO Mojo open data contract
 			}
-			break;
-
-		case MOJOV_KEYSTATE_ADDR:
-			csrs.mojov_keystate.reg.val = value;
 			break;
 
 
