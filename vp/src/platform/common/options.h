@@ -32,6 +32,18 @@ class Options : public boost::program_options::options_description {
 	bool property_map_export = false;
 	bool property_map_is_loaded = false;
 
+	//mojo v options
+	std::string mojov_pk_file;
+	std::string mojov_sk_file;
+
+	bool mojov_fast = false;
+	bool mojov_strong = false;
+	bool mojov_proofcarrying = false;
+
+	bool mojov_verbose = false;
+
+	int mojov_arg = 0;
+
 	virtual void printValues(std::ostream& os = std::cout) const;
 
 	void handle_property_export_and_exit();

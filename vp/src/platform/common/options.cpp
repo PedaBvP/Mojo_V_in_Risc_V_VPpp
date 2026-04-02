@@ -33,8 +33,16 @@ Options::Options(void) {
 		("property-map", po::value<std::string>(&property_map_file)->default_value(""),"ProppertyMap json file to load or save (see property-map-export)")
 		("property-map-export", po::bool_switch(&property_map_export), "save a ProppertyMap (--property-map) of the model properties and default values (elaboration phase) and exit")
 
-		("input-file", po::value<std::string>(&input_program)->required(), "input file to use for execution");
+		("input-file", po::value<std::string>(&input_program)->required(), "input file to use for execution")
 	// clang-format on
+	//mojo v options
+		("mojov-pk", po::value<std::string>(&mojov_pk_file),"Load Mojo-V CPU public key")
+		("mojov-sk", po::value<std::string>(&mojov_sk_file),"Load Mojo-V CPU secret key")
+		("mojov-fast", po::bool_switch(&mojov_fast),"Use Mojo-V fast encryption mode")
+		("mojov-strong", po::bool_switch(&mojov_strong),"Use Mojo-V strong encryption mode")
+		("mojov-proofcarrying", po::bool_switch(&mojov_proofcarrying),"Use Mojo-V proof-carrying encryption mode")
+		("mojov-arg", po::value<int>(&mojov_arg),"Pass numeric argument to Mojo-V test")
+		("mojov-verbose", po::bool_switch(&mojov_verbose),"Verbose Mojo-V setup");
 
 	pos.add("input-file", 1);
 }
