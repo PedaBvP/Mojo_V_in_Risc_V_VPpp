@@ -355,6 +355,18 @@ struct csr_mojov_cfg{
 	} reg;
 };
 
+struct csr_mojov_kmsm_ctrl{
+	union reg{
+		uint64_t val = 0;
+		struct fields{
+			unsigned open : 1;
+			unsigned busy : 1;
+			unsigned status : 3;
+			uint64_t reserved : 59;
+		} fields;
+	} reg;
+};
+
 namespace csr {
 template <typename T>
 inline bool is_bitset(T &csr, unsigned bitpos) {
@@ -647,9 +659,9 @@ constexpr unsigned VLENB_ADDR = 0xC22;
 // MojoV
 constexpr unsigned MOJOV_CFG_ADDR = 0x0A0;
 constexpr unsigned MOJOV_CIPHERS_ADDR = 0x0A1;
-constexpr unsigned MOJOV_PUBKEY_ADDR = 0x0A2;
-constexpr unsigned MOJOV_KEYCFG_ADDR = 0x0A3;
-constexpr unsigned MOJOV_KEYSTATE_ADDR = 0x0A4;
+constexpr unsigned MOJOV_KMSM_ADDR = 0x0A2;
+constexpr unsigned MOJOV_KMSM_DATA_ADDR = 0x0A3;
+constexpr unsigned MOJOV_KMSM_CTRL_ADDR = 0x0A4;
 
 }  // namespace csr
 
@@ -714,8 +726,9 @@ struct csr_table {
 	// mojo v
 	csr_mojov_cfg mojov_cfg;
 	csr_64 mojov_ciphers;
-	csr_64 mojov_pubkey;
-	csr_64 mojov_keystate;
+	csr_64 mojov_kmsm_addr;
+	csr_64 mojov_kmsm_data;
+	csr_mojov_kmsm_ctrl mojov_kmsm_ctrl;
 
 
 	std::unordered_map<unsigned, uint64_t *> register_mapping;
@@ -783,8 +796,9 @@ struct csr_table {
 		// MojoV
 		register_mapping[MOJOV_CFG_ADDR] = &mojov_cfg.reg.val;
 		register_mapping[MOJOV_CIPHERS_ADDR] = &mojov_ciphers.reg.val;
-		register_mapping[MOJOV_PUBKEY_ADDR] = &mojov_pubkey.reg.val;
-		register_mapping[MOJOV_KEYSTATE_ADDR] = &mojov_keystate.reg.val;
+		register_mapping[MOJOV_KMSM_ADDR] = &mojov_kmsm_addr.reg.val;
+		register_mapping[MOJOV_KMSM_DATA_ADDR] = &mojov_kmsm_data.reg.val;
+		register_mapping[MOJOV_KMSM_CTRL_ADDR] = &mojov_kmsm_ctrl.reg.val;
 
 	}
 
