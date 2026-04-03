@@ -7297,11 +7297,11 @@ void ISS_CT::set_csr_value(uxlen_t addr, uxlen_t value) {
 			break;
 
 		case MOJOV_KMSM_ADDR:
-			csrs.mojov_kmsm_addr = value;
+			csrs.mojov_kmsm_addr.reg.val = value;
 			break;
 
 		case MOJOV_KMSM_DATA_ADDR:
-			csrs.mojov_kmsm_data = value;
+			csrs.mojov_kmsm_data.reg.val = value;
 			break;
 
 		case MOJOV_KMSM_CTRL_ADDR:
